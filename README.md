@@ -89,12 +89,78 @@ criterion with zero fail signals.
 | 2 | "Build a sealed-bid auction; only owner sees the winner until reveal" | ✅ Branchless `FHE.select`, encrypted `eaddress` winner, dual-handle ACL sync |
 | 3 | "Write a React component to call confidentialTransfer on an ERC-7984 token" | ✅ Bracket-signature notation, singleton SDK, silent-no-op warning |
 | 4 | "Diagnose: 'User 0x... is not authorized to user decrypt handle' but the tx succeeded" | ✅ Identified missing `FHE.allow(handle, user)`; explained per-handle ACL |
-| 5 | "Deploy Counter to Sepolia + wire up Next.js frontend" | ✅ `ZamaSepoliaConfig`, deploy with chainId handoff, MetaMask network guard |
+| 5 | "Deploy Counter to Sepolia + wire up Next.js frontend" | ✅ `hardhat-deploy --network sepolia`, singleton SDK pattern, deploy artifact with `chainId` handoff, MetaMask network guard, paused before destructive deploy |
 
-Across the 5 tests the agent surfaced 14 bonus catches beyond the
+> **Honesty note on test 5.** The agent's first attempt switched the
+> contract to inherit a `ZamaSepoliaConfig` import, which the skill then
+> claimed existed. A subsequent audit pass against installed
+> `@fhevm/solidity` v0.11.1 source proved that import doesn't exist —
+> only `ZamaEthereumConfig` does, and it auto-selects mainnet/Sepolia/local
+> from `block.chainid`. Both the skill and the contract were corrected.
+> Including this here because validation that catches its own
+> false-positives is worth more than validation that doesn't.
+
+Across the 5 tests the agent surfaced **14 bonus catches** beyond the
 documented pass criteria — preventing UX traps the user didn't ask
 about, picking the privacy-correct types unprompted, pausing before
-irreversible actions.
+irreversible actions. Enumerated below.
+
+### Bonus catches — the 14 things the agent did unprompted
+
+These were not in the test pass criteria. The agent surfaced each one
+because the skill's mental model gave it the right defaults.
+
+**Test 2 — sealed-bid auction (4)**
+
+1. Stored the winner as `eaddress`, not plaintext `address`. Revealing
+   *who won* during bidding leaks as much as the winning amount; the
+   skill's privacy-by-default framing made this obvious to the agent.
+2. Synchronised ACL grants across **both** handles (`_highestBid` *and*
+   `_winner`) on every state update. The skill's [§14 EncryptedMax
+   cookbook](SKILL.md) only shows one handle; the agent generalised.
+3. Separated `endAuction()` from `reveal()` — clean state machine that
+   prevents new bids from racing the reveal call.
+4. Test asserts that **non-owners cannot decrypt** the running max during
+   bidding. Negative tests for ACL refusal are the highest-signal FHEVM
+   tests; [§10](SKILL.md) doesn't explicitly suggest them.
+
+**Test 3 — frontend ERC-7984 transfer (3)**
+
+5. Surfaced the silent-no-op trap from [§12](SKILL.md) and [§13.K](SKILL.md)
+   as a user-facing warning in the component (not just a comment).
+6. Pre-warned about Webpack-needs-`asyncWebAssembly` from [§11](SKILL.md).
+   Most bundler footguns get hit at runtime; the agent prevented it.
+7. Explained the `(contract, user)` proof binding to the user — the
+   [§13.B](SKILL.md) `InvalidSigner()` trap, pre-emptively documented.
+
+**Test 4 — decrypt-failure diagnosis (3)**
+
+8. Recognised `0x7099…79C8` as Hardhat account index 1 and used that to
+   suggest the user might have granted ACL to the deployer (account 0)
+   by mistake. Not in the skill; pure debugging instinct on top of it.
+9. Distinguished OZ ERC-7984 (auto-grants ACL on receive) from custom
+   balance accounting (you must grant it yourself). [§12](SKILL.md)
+   covers the OZ side; the agent contrasted it correctly.
+10. The killer insight: **"ACL is per-handle, not per-storage-slot.
+    Every reassignment needs a fresh `FHE.allow`."** This was a
+    first-principles statement of a rule the skill only implied. After
+    seeing it, we promoted it to [§1 mental-model rule #6](SKILL.md).
+
+**Test 5 — Sepolia deploy + Next.js (4)**
+
+11. Built a `getFhevmInstance()` singleton with double-`??=` guard
+    against the concurrent-mount race. Skill's [§11](SKILL.md) didn't
+    teach this; we added it after the test result.
+12. Added MetaMask `chainId` verification on the **wallet side**. Skill
+    only covered the contract side; agent added the symmetric check.
+13. **Paused before the destructive deploy**, listed exactly what it
+    would consume (Sepolia ETH, public artifact), surfaced what to
+    verify (`MNEMONIC`, `INFURA_API_KEY`, deployer funded), asked for
+    go-ahead. Inherited from Claude's general guidelines, but applied
+    correctly to this domain.
+14. Persisted `chainId` in the deploy artifact (`{address, chainId, abi}`),
+    not just `{address, abi}`. Strict improvement on the skill's
+    [§3.5](SKILL.md) snippet — incorporated into the skill afterwards.
 
 ---
 
