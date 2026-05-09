@@ -162,6 +162,45 @@ because the skill's mental model gave it the right defaults.
     not just `{address, abi}`. Strict improvement on the skill's
     [§3.5](SKILL.md) snippet — incorporated into the skill afterwards.
 
+### 3. Real-world deployment — Confidential GoFundMe
+
+- Live: **https://confidential-gofundme.vercel.app**
+- Source: **https://github.com/DannyTrillion/confidential-gofundme**
+
+A privacy-preserving crowdfunding webapp built on FHEVM using this skill
+in a fresh Claude Code session. Causes, goals, and recipient wallets are
+public; **individual donor amounts are encrypted as `euint64` on-chain**
+via ERC-7984. Built in one weekend (excluding UI/UX polish).
+
+This is the strongest validation in the README — not a controlled
+benchmark, a real shipped product. Two concrete moments from the build:
+
+#### A pattern the skill saved from re-deriving
+
+`FHE.makePubliclyDecryptable(_encTotal)` for the running donation
+total. Without [§9 Pattern A](SKILL.md), this is the kind of thing that
+swallows an hour — trying `FHE.allow` first (wrong, that's per-address)
+or building a KMS-callback song-and-dance. The whole product hinges on
+that one line being placed correctly in both the constructor and every
+state-mutating function (donate, withdraw, etc.). Worked first try.
+
+#### An anti-pattern the skill caught at the keyboard
+
+During the encrypted-recipient phase, the natural reach was for
+`require(FHE.eq(msg.sender, _encBeneficiary), …)` in `withdraw()` —
+`require` on an `ebool`. [§1 rule 4](SKILL.md) and [§13.F](SKILL.md)
+flagged it before typing finished. Switched to:
+
+```solidity
+ebool gate = FHE.eq(msg.sender, _encBeneficiary);
+funds = FHE.select(gate, _encTotal, FHE.asEuint64(0));
+```
+
+The contract never observes the gate result; the relayer only sees funds
+either move or not. Without the skill, that's a 30-minute compile-fail
+detour at minimum — and at worst a leaky `if (FHE.decrypt(...))` that
+ships before someone points out the leak.
+
 ---
 
 ## Repository layout
