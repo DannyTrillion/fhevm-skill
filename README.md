@@ -7,6 +7,8 @@
 > compiles and every documented error string is verified by a passing
 > test.
 
+**📹 Demo video (≤3 min):** https://youtu.be/i_OHMYBUj_M
+
 ---
 
 ## What this is
